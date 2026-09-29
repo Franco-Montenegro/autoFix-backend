@@ -35,4 +35,4 @@ build/
 ###
 #Claude.md
 
-application-local.yml
+application-local.properties

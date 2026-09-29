@@ -41,8 +41,9 @@ Paquetes por capa dentro del paquete base:
 - Cambios pequeños y enfocados: una funcionalidad por vez.
 
 ## Configuración y seguridad
-- Perfil "local": application-local.yml (ignorado por git).
-- Credenciales de BD solo por variables de entorno (DB_URL, DB_USER, DB_PASSWORD).
+- Configuración en archivos .properties (no YAML): application.properties.
+- Perfil "local": application-local.properties (ignorado por git).
+- Credenciales de BD solo por variables de entorno (DB_HOST, DB_USERNAME, DB_PASSWORD).
 - Nunca escribir credenciales en código, en archivos versionados ni en el chat.
 
 ## Cómo trabajar conmigo
