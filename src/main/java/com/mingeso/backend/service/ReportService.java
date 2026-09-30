@@ -2,17 +2,17 @@ package com.mingeso.backend.service;
 
 import com.mingeso.backend.dto.R1ReportResponse;
 import com.mingeso.backend.dto.R2ReportResponse;
-import com.mingeso.backend.dto.R2ReportResponse.Cell;
 import com.mingeso.backend.dto.R3ReportResponse;
-import com.mingeso.backend.entity.RepairType;
+import com.mingeso.backend.dto.R4ReportResponse;
+import com.mingeso.backend.entity.EngineType;
 import com.mingeso.backend.entity.VehicleType;
 import com.mingeso.backend.exception.BadRequestException;
 import com.mingeso.backend.repository.RepairOrderItemRepository;
-import com.mingeso.backend.repository.RepairOrderItemRepository.RepairTypeByVehicleType;
 import com.mingeso.backend.repository.RepairOrderRepository;
 import com.mingeso.backend.repository.RepairOrderRepository.RepairTime;
 import com.mingeso.backend.repository.RepairTypeRepository;
 import com.mingeso.backend.service.report.DescriptiveStatistics;
+import com.mingeso.backend.service.report.RepairMatrixBuilder;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
@@ -22,9 +22,7 @@ import java.time.Duration;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Comparator;
 import java.util.EnumMap;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -57,35 +55,18 @@ public class ReportService {
     @Transactional(readOnly = true)
     public R2ReportResponse r2(LocalDate from, LocalDate to) {
         validateRange(from, to);
+        List<RepairMatrixBuilder.Aggregate<VehicleType>> aggregates = repairOrderItemRepository
+                .sumDeliveredByRepairTypeAndVehicleType(from.atStartOfDay(), to.plusDays(1).atStartOfDay())
+                .stream()
+                .map(a -> new RepairMatrixBuilder.Aggregate<>(
+                        a.getRepairTypeId(), a.getVehicleType(), a.getCount(), a.getAmount()))
+                .toList();
 
-        // repairTypeId -> (vehicleType -> celda) con lo que devuelve la BD; lo que falta es 0.
-        Map<Integer, Map<VehicleType, Cell>> found = new HashMap<>();
-        for (RepairTypeByVehicleType agg : repairOrderItemRepository.sumDeliveredByRepairTypeAndVehicleType(
-                from.atStartOfDay(), to.plusDays(1).atStartOfDay())) {
-            found.computeIfAbsent(agg.getRepairTypeId(), id -> new EnumMap<>(VehicleType.class))
-                    .put(agg.getVehicleType(), new Cell(agg.getCount(), agg.getAmount()));
-        }
+        RepairMatrixBuilder.Result<VehicleType> matrix = RepairMatrixBuilder.build(
+                repairTypeRepository.findAll(Sort.by("id")), VehicleType.class, aggregates);
 
-        Map<VehicleType, Cell> columnTotals = emptyCellsByVehicleType();
-        Cell grandTotal = Cell.EMPTY;
-        List<R2ReportResponse.Row> rows = new ArrayList<>();
-
-        for (RepairType repairType : repairTypeRepository.findAll(Sort.by("id"))) {
-            Map<VehicleType, Cell> cells = emptyCellsByVehicleType();
-            cells.putAll(found.getOrDefault(repairType.getId(), Map.of()));
-
-            Cell rowTotal = cells.values().stream().reduce(Cell.EMPTY, Cell::plus);
-            cells.forEach((type, cell) -> columnTotals.merge(type, cell, Cell::plus));
-            grandTotal = grandTotal.plus(rowTotal);
-
-            rows.add(new R2ReportResponse.Row(repairType.getId(), repairType.getName(), cells, rowTotal));
-        }
-
-        rows.sort(Comparator
-                .comparing((R2ReportResponse.Row row) -> row.total().amount()).reversed()
-                .thenComparing(R2ReportResponse.Row::repairTypeId));
-
-        return new R2ReportResponse(from, to, Arrays.asList(VehicleType.values()), rows, columnTotals, grandTotal);
+        return new R2ReportResponse(from, to, Arrays.asList(VehicleType.values()),
+                matrix.rows(), matrix.columnTotals(), matrix.grandTotal());
     }
 
     /** R3: estadisticas del tiempo salida - ingreso (horas) por tipo de vehiculo; ingresos con salida registrada. */
@@ -113,12 +94,22 @@ public class ReportService {
         return new R3ReportResponse(from, to, "HOURS", rows);
     }
 
-    private static Map<VehicleType, Cell> emptyCellsByVehicleType() {
-        Map<VehicleType, Cell> cells = new EnumMap<>(VehicleType.class);
-        for (VehicleType type : VehicleType.values()) {
-            cells.put(type, Cell.EMPTY);
-        }
-        return cells;
+    /** R4: reparaciones vs tipos de motor, solo ingresos entregados; filas por monto total descendente. */
+    @Transactional(readOnly = true)
+    public R4ReportResponse r4(LocalDate from, LocalDate to) {
+        validateRange(from, to);
+        List<RepairMatrixBuilder.Aggregate<EngineType>> aggregates = repairOrderItemRepository
+                .sumDeliveredByRepairTypeAndEngineType(from.atStartOfDay(), to.plusDays(1).atStartOfDay())
+                .stream()
+                .map(a -> new RepairMatrixBuilder.Aggregate<>(
+                        a.getRepairTypeId(), a.getEngineType(), a.getCount(), a.getAmount()))
+                .toList();
+
+        RepairMatrixBuilder.Result<EngineType> matrix = RepairMatrixBuilder.build(
+                repairTypeRepository.findAll(Sort.by("id")), EngineType.class, aggregates);
+
+        return new R4ReportResponse(from, to, Arrays.asList(EngineType.values()),
+                matrix.rows(), matrix.columnTotals(), matrix.grandTotal());
     }
 
     private void validateRange(LocalDate from, LocalDate to) {
