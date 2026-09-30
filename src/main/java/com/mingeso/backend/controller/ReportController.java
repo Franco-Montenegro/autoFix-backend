@@ -1,6 +1,7 @@
 package com.mingeso.backend.controller;
 
 import com.mingeso.backend.dto.R1ReportResponse;
+import com.mingeso.backend.dto.R2ReportResponse;
 import com.mingeso.backend.service.ReportService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.format.annotation.DateTimeFormat;
@@ -24,5 +25,13 @@ public class ReportController {
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) {
         return reportService.r1(from, to);
+    }
+
+    /** R2: las 11 reparaciones vs tipos de vehiculo (ingresos entregados), con totales. */
+    @GetMapping("/r2")
+    public R2ReportResponse r2(
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) {
+        return reportService.r2(from, to);
     }
 }

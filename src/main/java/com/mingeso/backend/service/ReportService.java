@@ -1,14 +1,28 @@
 package com.mingeso.backend.service;
 
 import com.mingeso.backend.dto.R1ReportResponse;
+import com.mingeso.backend.dto.R2ReportResponse;
+import com.mingeso.backend.dto.R2ReportResponse.Cell;
+import com.mingeso.backend.entity.RepairType;
+import com.mingeso.backend.entity.VehicleType;
 import com.mingeso.backend.exception.BadRequestException;
+import com.mingeso.backend.repository.RepairOrderItemRepository;
+import com.mingeso.backend.repository.RepairOrderItemRepository.RepairTypeByVehicleType;
 import com.mingeso.backend.repository.RepairOrderRepository;
+import com.mingeso.backend.repository.RepairTypeRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Comparator;
+import java.util.EnumMap;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Reportes R1-R4. Todos filtran los ingresos por fecha de ingreso, con ambos dias del rango incluidos.
@@ -18,6 +32,8 @@ import java.util.List;
 public class ReportService {
 
     private final RepairOrderRepository repairOrderRepository;
+    private final RepairOrderItemRepository repairOrderItemRepository;
+    private final RepairTypeRepository repairTypeRepository;
 
     @Transactional(readOnly = true)
     public R1ReportResponse r1(LocalDate from, LocalDate to) {
@@ -29,6 +45,49 @@ public class ReportService {
                 .map(order -> R1ReportResponse.Row.from(order, RepairOrderService.statusOf(order)))
                 .toList();
         return R1ReportResponse.of(from, to, rows);
+    }
+
+    /** R2: reparaciones vs tipos de vehiculo, solo ingresos entregados; filas por monto total descendente. */
+    @Transactional(readOnly = true)
+    public R2ReportResponse r2(LocalDate from, LocalDate to) {
+        validateRange(from, to);
+
+        // repairTypeId -> (vehicleType -> celda) con lo que devuelve la BD; lo que falta es 0.
+        Map<Integer, Map<VehicleType, Cell>> found = new HashMap<>();
+        for (RepairTypeByVehicleType agg : repairOrderItemRepository.sumDeliveredByRepairTypeAndVehicleType(
+                from.atStartOfDay(), to.plusDays(1).atStartOfDay())) {
+            found.computeIfAbsent(agg.getRepairTypeId(), id -> new EnumMap<>(VehicleType.class))
+                    .put(agg.getVehicleType(), new Cell(agg.getCount(), agg.getAmount()));
+        }
+
+        Map<VehicleType, Cell> columnTotals = emptyCellsByVehicleType();
+        Cell grandTotal = Cell.EMPTY;
+        List<R2ReportResponse.Row> rows = new ArrayList<>();
+
+        for (RepairType repairType : repairTypeRepository.findAll(Sort.by("id"))) {
+            Map<VehicleType, Cell> cells = emptyCellsByVehicleType();
+            cells.putAll(found.getOrDefault(repairType.getId(), Map.of()));
+
+            Cell rowTotal = cells.values().stream().reduce(Cell.EMPTY, Cell::plus);
+            cells.forEach((type, cell) -> columnTotals.merge(type, cell, Cell::plus));
+            grandTotal = grandTotal.plus(rowTotal);
+
+            rows.add(new R2ReportResponse.Row(repairType.getId(), repairType.getName(), cells, rowTotal));
+        }
+
+        rows.sort(Comparator
+                .comparing((R2ReportResponse.Row row) -> row.total().amount()).reversed()
+                .thenComparing(R2ReportResponse.Row::repairTypeId));
+
+        return new R2ReportResponse(from, to, Arrays.asList(VehicleType.values()), rows, columnTotals, grandTotal);
+    }
+
+    private static Map<VehicleType, Cell> emptyCellsByVehicleType() {
+        Map<VehicleType, Cell> cells = new EnumMap<>(VehicleType.class);
+        for (VehicleType type : VehicleType.values()) {
+            cells.put(type, Cell.EMPTY);
+        }
+        return cells;
     }
 
     private void validateRange(LocalDate from, LocalDate to) {
