@@ -26,4 +26,9 @@ public interface RepairOrderRepository extends JpaRepository<RepairOrder, Long> 
             Vehicle vehicle, LocalDateTime from, LocalDateTime to);
 
     long countByBonus(Bonus bonus);
+
+    /** Ingresos con fecha de ingreso en [from, to), con su vehiculo, para los reportes. */
+    @EntityGraph(attributePaths = {"vehicle"})
+    List<RepairOrder> findByEntryDateTimeGreaterThanEqualAndEntryDateTimeLessThanOrderByEntryDateTimeAscIdAsc(
+            LocalDateTime from, LocalDateTime to);
 }

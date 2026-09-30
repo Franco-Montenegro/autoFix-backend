@@ -239,7 +239,8 @@ public class RepairOrderService {
         };
     }
 
-    private RepairOrderStatus statusOf(RepairOrder order) {
+    /** El estado no se persiste: se deduce de las fechas de salida y retiro. */
+    public static RepairOrderStatus statusOf(RepairOrder order) {
         if (order.getPickupDateTime() != null) {
             return RepairOrderStatus.DELIVERED;
         }
