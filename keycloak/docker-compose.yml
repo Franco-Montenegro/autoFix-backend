@@ -1,0 +1,20 @@
+# Keycloak local para desarrollo (Fase 8).
+# Uso: copiar .env.example a .env, completar los valores y ejecutar `docker compose up -d` en esta carpeta.
+# Al arrancar importa el realm "autofix" desde realm-autofix.json (roles, clientes y usuarios de prueba).
+# Modo start-dev: base H2 interna del contenedor; `docker compose down` borra los datos y el siguiente
+# `up` vuelve a importar el realm desde cero.
+services:
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.3
+    container_name: autofix-keycloak
+    command: start-dev --import-realm
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KC_BOOTSTRAP_ADMIN_USERNAME:?Falta KC_BOOTSTRAP_ADMIN_USERNAME en .env}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KC_BOOTSTRAP_ADMIN_PASSWORD:?Falta KC_BOOTSTRAP_ADMIN_PASSWORD en .env}
+      # Contraseñas de los usuarios de prueba; el realm las lee con placeholders ${...}
+      AUTOFIX_ADMIN_PASSWORD: ${AUTOFIX_ADMIN_PASSWORD:?Falta AUTOFIX_ADMIN_PASSWORD en .env}
+      AUTOFIX_USER_PASSWORD: ${AUTOFIX_USER_PASSWORD:?Falta AUTOFIX_USER_PASSWORD en .env}
+    ports:
+      - "${KEYCLOAK_PORT:-8080}:8080"
+    volumes:
+      - ./realm-autofix.json:/opt/keycloak/data/import/realm-autofix.json:ro

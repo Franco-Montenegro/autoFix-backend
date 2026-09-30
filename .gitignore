@@ -36,3 +36,5 @@ build/
 #Claude.md
 
 application-local.properties
+# Keycloak local: valores reales de las variables (ver keycloak/.env.example)
+keycloak/.env

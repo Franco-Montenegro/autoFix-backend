@@ -1,0 +1,77 @@
+{
+  "realm": "autofix",
+  "displayName": "AutoFix",
+  "enabled": true,
+  "sslRequired": "external",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": false,
+  "resetPasswordAllowed": false,
+  "bruteForceProtected": true,
+  "accessTokenLifespan": 900,
+  "roles": {
+    "realm": [
+      { "name": "ADMIN", "description": "Acceso a todas las historias de usuario (HU1-HU7)" },
+      { "name": "USER", "description": "Acceso a HU1-HU4" }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "autofix-frontend",
+      "name": "AutoFix Frontend",
+      "description": "SPA del taller. Login con la pagina de Keycloak (authorization code + PKCE).",
+      "enabled": true,
+      "publicClient": true,
+      "protocol": "openid-connect",
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "implicitFlowEnabled": false,
+      "serviceAccountsEnabled": false,
+      "rootUrl": "http://localhost:5173",
+      "baseUrl": "/",
+      "redirectUris": ["http://localhost:5173/*"],
+      "webOrigins": ["http://localhost:5173"],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "http://localhost:5173/*"
+      }
+    },
+    {
+      "clientId": "autofix-dev",
+      "name": "AutoFix Dev (solo desarrollo local)",
+      "description": "Obtiene tokens con usuario y contraseña (direct access grants) para probar la API con Postman o curl. No importar en despliegue.",
+      "enabled": true,
+      "publicClient": true,
+      "protocol": "openid-connect",
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": true,
+      "implicitFlowEnabled": false,
+      "serviceAccountsEnabled": false
+    }
+  ],
+  "users": [
+    {
+      "username": "admin",
+      "enabled": true,
+      "firstName": "Admin",
+      "lastName": "AutoFix",
+      "email": "admin@autofix.local",
+      "emailVerified": true,
+      "credentials": [
+        { "type": "password", "value": "${AUTOFIX_ADMIN_PASSWORD}", "temporary": false }
+      ],
+      "realmRoles": ["ADMIN", "default-roles-autofix"]
+    },
+    {
+      "username": "user",
+      "enabled": true,
+      "firstName": "Usuario",
+      "lastName": "AutoFix",
+      "email": "user@autofix.local",
+      "emailVerified": true,
+      "credentials": [
+        { "type": "password", "value": "${AUTOFIX_USER_PASSWORD}", "temporary": false }
+      ],
+      "realmRoles": ["USER", "default-roles-autofix"]
+    }
+  ]
+}
