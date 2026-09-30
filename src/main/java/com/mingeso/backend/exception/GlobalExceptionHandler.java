@@ -14,8 +14,13 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.HandlerMethodValidationException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.exc.InvalidFormatException;
 
+import java.util.Arrays;
 import java.util.List;
+import java.util.Objects;
+import java.util.stream.Collectors;
 
 @Slf4j
 @RestControllerAdvice
@@ -44,7 +49,25 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(HttpMessageNotReadableException.class)
     public ResponseEntity<ErrorResponse> handleUnreadableBody(HttpMessageNotReadableException ex) {
+        if (ex.getMostSpecificCause() instanceof InvalidFormatException ife
+                && ife.getTargetType() != null && ife.getTargetType().isEnum()) {
+            return handleInvalidEnum(ife);
+        }
         return build(HttpStatus.BAD_REQUEST, "El cuerpo de la solicitud no es válido o tiene un formato incorrecto");
+    }
+
+    /** Valor de enum desconocido en el JSON, ej. "vehicleType": "FURGONETA". */
+    private ResponseEntity<ErrorResponse> handleInvalidEnum(InvalidFormatException ex) {
+        String field = ex.getPath().stream()
+                .map(JacksonException.Reference::getPropertyName)
+                .filter(Objects::nonNull)
+                .collect(Collectors.joining("."));
+        String allowed = Arrays.stream(ex.getTargetType().getEnumConstants())
+                .map(Object::toString)
+                .collect(Collectors.joining(", "));
+        String message = "Valor inválido para '" + field + "'. Valores permitidos: " + allowed;
+        return build(HttpStatus.BAD_REQUEST, "La solicitud contiene datos inválidos",
+                List.of(new ErrorResponse.FieldError(field, message)));
     }
 
     @ExceptionHandler(MethodArgumentTypeMismatchException.class)
