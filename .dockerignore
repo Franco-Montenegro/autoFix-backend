@@ -1,0 +1,15 @@
+# Solo se necesitan mvnw, .mvn, pom.xml y src para construir la imagen
+target/
+.git/
+.gitignore
+.gitattributes
+.idea/
+.vscode/
+*.iml
+keycloak/
+*.md
+Dockerfile
+.dockerignore
+
+# Configuracion local: nunca debe quedar dentro del jar de la imagen
+src/main/resources/application-local.properties

@@ -6,8 +6,8 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Component;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.util.List;
@@ -15,6 +15,8 @@ import java.util.List;
 /**
  * Carga inicial idempotente del catalogo de reparaciones:
  * inserta las 11 filas solo si la tabla esta vacia.
+ * Con varias replicas arrancando a la vez, todas pueden ver la tabla vacia; la primera inserta
+ * y las demas chocan con la clave primaria. Ese choque se toma como "catalogo ya cargado".
  */
 @Slf4j
 @Component
@@ -23,8 +25,11 @@ public class RepairTypeDataLoader implements ApplicationRunner {
 
     private final RepairTypeRepository repairTypeRepository;
 
+    /**
+     * Sin @Transactional a proposito: saveAllAndFlush abre y confirma su propia transaccion,
+     * asi un choque con otra replica se lanza aqui y no al confirmar, fuera del try.
+     */
     @Override
-    @Transactional
     public void run(ApplicationArguments args) {
         if (repairTypeRepository.count() > 0) {
             return;
@@ -42,8 +47,12 @@ public class RepairTypeDataLoader implements ApplicationRunner {
                 repairType(10, "Reparaciones del Sistema de Combustible", 130_000, 140_000, 220_000, 0),
                 repairType(11, "Reparación y Reemplazo del Parabrisas y Cristales", 80_000, 80_000, 80_000, 80_000)
         );
-        repairTypeRepository.saveAll(catalog);
-        log.info("Catalogo de reparaciones cargado: {} registros", catalog.size());
+        try {
+            repairTypeRepository.saveAllAndFlush(catalog);
+            log.info("Catalogo de reparaciones cargado: {} registros", catalog.size());
+        } catch (DataIntegrityViolationException e) {
+            log.warn("Otra instancia cargo el catalogo de reparaciones al mismo tiempo; se usa el existente");
+        }
     }
 
     private static RepairType repairType(int id, String name,
