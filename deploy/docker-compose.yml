@@ -1,0 +1,167 @@
+# Despliegue de produccion de AutoFix (Fase 11.3).
+# Uso: copiar .env.example a .env, completar los valores y ejecutar en esta carpeta:
+#   docker compose pull && docker compose up -d
+#
+# Un solo origen publico (AUTOFIX_PUBLIC_URL). Solo nginx-frontend publica puertos:
+#   /       -> nginx-frontend -> frontend1..3 (round robin)
+#   /api/   -> nginx-backend  -> backend1..3  (round robin)
+#   /auth/  -> keycloak
+# El mismo archivo sirve en el PC (http://localhost) y en EC2 (https://<dominio>);
+# lo que cambia es el .env (URL publica y configuracion de nginx-frontend).
+
+# Configuracion comun de las 3 replicas del backend
+x-backend: &backend
+  image: ${DOCKERHUB_USERNAME:?Falta DOCKERHUB_USERNAME en .env}/autofix-backend:${IMAGE_TAG:-latest}
+  restart: unless-stopped
+  environment:
+    DB_HOST: mysql
+    DB_USERNAME: ${MYSQL_USER:?Falta MYSQL_USER en .env}
+    DB_PASSWORD: ${MYSQL_PASSWORD:?Falta MYSQL_PASSWORD en .env}
+    # Nunca create-drop: borraria los datos cada vez que se detiene una replica
+    SPRING_JPA_HIBERNATE_DDL_AUTO: update
+    CORS_ALLOWED_ORIGINS: ${AUTOFIX_PUBLIC_URL:?Falta AUTOFIX_PUBLIC_URL en .env}
+    # El token lo emite Keycloak por la URL publica: ese es el "iss" que se valida...
+    KEYCLOAK_ISSUER_URI: ${AUTOFIX_PUBLIC_URL}/auth/realms/autofix
+    # ...pero las llaves se descargan por la red interna, sin salir a internet
+    SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI: http://keycloak:8080/auth/realms/autofix/protocol/openid-connect/certs
+    JAVA_TOOL_OPTIONS: -XX:MaxRAMPercentage=75.0
+  mem_limit: 512m
+  depends_on:
+    mysql:
+      condition: service_healthy
+    keycloak:
+      condition: service_started
+  networks:
+    - autofix
+
+# Configuracion comun de las 3 replicas del frontend (config.js se genera al arrancar)
+x-frontend: &frontend
+  image: ${DOCKERHUB_USERNAME}/autofix-frontend:${IMAGE_TAG:-latest}
+  restart: unless-stopped
+  environment:
+    API_URL: ${AUTOFIX_PUBLIC_URL}/api
+    KEYCLOAK_URL: ${AUTOFIX_PUBLIC_URL}/auth
+    KEYCLOAK_REALM: autofix
+    KEYCLOAK_CLIENT_ID: autofix-frontend
+  mem_limit: 64m
+  networks:
+    - autofix
+
+services:
+  # ---- Datos: una sola instancia de MySQL (base de la app + base de Keycloak) ----
+  mysql:
+    image: mysql:8.4
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?Falta MYSQL_ROOT_PASSWORD en .env}
+      # Base de la app y su usuario (el esquema lo crea Hibernate con ddl-auto=update)
+      MYSQL_DATABASE: dbautofix
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      # Usados por mysql-init/01-keycloak-db.sh para crear la base de Keycloak
+      KC_DB_USERNAME: ${KC_DB_USERNAME:?Falta KC_DB_USERNAME en .env}
+      KC_DB_PASSWORD: ${KC_DB_PASSWORD:?Falta KC_DB_PASSWORD en .env}
+    volumes:
+      - mysql-data:/var/lib/mysql
+      # Solo se ejecuta la primera vez (volumen vacio)
+      - ./mysql-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      # Por TCP: durante la inicializacion MySQL corre sin red, asi no se reporta sano antes de tiempo
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u root -p\"$$MYSQL_ROOT_PASSWORD\" --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    mem_limit: 768m
+    networks:
+      - autofix
+
+  # ---- Identidad: Keycloak en modo produccion, detras del proxy en /auth ----
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.3
+    restart: unless-stopped
+    # Importa el realm solo si no existe en la base de datos
+    command: start --import-realm
+    environment:
+      KC_DB: mysql
+      KC_DB_URL: jdbc:mysql://mysql:3306/keycloak
+      KC_DB_USERNAME: ${KC_DB_USERNAME}
+      KC_DB_PASSWORD: ${KC_DB_PASSWORD}
+      KC_HTTP_RELATIVE_PATH: /auth
+      # URL publica fija: define el "iss" de los tokens y las URLs que ve el navegador
+      KC_HOSTNAME: ${AUTOFIX_PUBLIC_URL}/auth
+      KC_PROXY_HEADERS: xforwarded
+      # HTTP solo dentro de la red de Docker; TLS lo termina nginx-frontend
+      KC_HTTP_ENABLED: "true"
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KC_BOOTSTRAP_ADMIN_USERNAME:?Falta KC_BOOTSTRAP_ADMIN_USERNAME en .env}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KC_BOOTSTRAP_ADMIN_PASSWORD:?Falta KC_BOOTSTRAP_ADMIN_PASSWORD en .env}
+      # Leidas por los placeholders ${...} de realm-autofix-prod.json
+      AUTOFIX_PUBLIC_URL: ${AUTOFIX_PUBLIC_URL}
+      AUTOFIX_ADMIN_PASSWORD: ${AUTOFIX_ADMIN_PASSWORD:?Falta AUTOFIX_ADMIN_PASSWORD en .env}
+      AUTOFIX_USER_PASSWORD: ${AUTOFIX_USER_PASSWORD:?Falta AUTOFIX_USER_PASSWORD en .env}
+    volumes:
+      - ./realm-autofix-prod.json:/opt/keycloak/data/import/realm-autofix.json:ro
+    mem_limit: 1g
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks:
+      - autofix
+
+  # ---- Backend: 3 replicas de la misma imagen ----
+  backend1:
+    <<: *backend
+  backend2:
+    <<: *backend
+  backend3:
+    <<: *backend
+
+  # ---- Frontend: 3 replicas de la misma imagen ----
+  frontend1:
+    <<: *frontend
+  frontend2:
+    <<: *frontend
+  frontend3:
+    <<: *frontend
+
+  # ---- Balanceador interno del backend (sin puertos publicados) ----
+  nginx-backend:
+    image: nginx:1.28-alpine
+    restart: unless-stopped
+    volumes:
+      - ./nginx-backend.conf:/etc/nginx/nginx.conf:ro
+    mem_limit: 64m
+    depends_on:
+      - backend1
+      - backend2
+      - backend3
+    networks:
+      - autofix
+
+  # ---- Entrada publica: TLS, balanceo del frontend y proxy de /api/ y /auth/ ----
+  nginx-frontend:
+    image: nginx:1.28-alpine
+    restart: unless-stopped
+    ports:
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+    volumes:
+      # nginx-frontend.conf (HTTPS, EC2) o nginx-frontend.http.conf (solo HTTP, PC)
+      - ./${NGINX_FRONTEND_CONF:-nginx-frontend.conf}:/etc/nginx/nginx.conf:ro
+      # Certificados de Let's Encrypt obtenidos con certbot en el host
+      - ${LETSENCRYPT_DIR:-/etc/letsencrypt}:/etc/letsencrypt:ro
+    mem_limit: 64m
+    depends_on:
+      - frontend1
+      - frontend2
+      - frontend3
+      - nginx-backend
+      - keycloak
+    networks:
+      - autofix
+
+volumes:
+  mysql-data:
+
+networks:
+  autofix:

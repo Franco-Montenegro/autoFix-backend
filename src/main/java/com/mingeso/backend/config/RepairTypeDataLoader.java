@@ -6,6 +6,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
+import org.springframework.core.annotation.Order;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Component;
 
@@ -17,9 +18,11 @@ import java.util.List;
  * inserta las 11 filas solo si la tabla esta vacia.
  * Con varias replicas arrancando a la vez, todas pueden ver la tabla vacia; la primera inserta
  * y las demas chocan con la clave primaria. Ese choque se toma como "catalogo ya cargado".
+ * Corre primero (@Order(1)): DemoDataLoader (@Order(2)) crea ingresos que necesitan el catalogo.
  */
 @Slf4j
 @Component
+@Order(1)
 @RequiredArgsConstructor
 public class RepairTypeDataLoader implements ApplicationRunner {
 

@@ -38,3 +38,6 @@ build/
 application-local.properties
 # Keycloak local: valores reales de las variables (ver keycloak/.env.example)
 keycloak/.env
+# Despliegue: valores reales de las variables (ver deploy/.env.example) y carpeta de certificados local
+deploy/.env
+deploy/letsencrypt/
